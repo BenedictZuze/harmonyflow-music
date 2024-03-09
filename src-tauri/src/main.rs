@@ -12,12 +12,6 @@ use tauri::State;
 
 mod audio_files;
 
-// Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
 #[tauri::command]
 fn play_audio(
     audio_path: &str,
@@ -32,7 +26,6 @@ fn play_audio(
     // let handle_state = Arc::clone(&sound_state);
     let mut state = sound_state.lock().unwrap();
     if let Some(mut handle) = state.handle.take() {
-        println!("Found a handle");
         // Perform operations on handle
         handle.stop(Tween { duration: Duration::from_secs(2), ..Default::default() }).unwrap();
         let sound_state = Arc::clone(&sound_state);
@@ -50,7 +43,6 @@ fn play_audio(
     } else {
         let sound_state = Arc::clone(&sound_state);
         thread::spawn(move || {
-            println!("Aint no handle");
             let now = Instant::now();
             let sound_data = StreamingSoundData::from_file(
                 path,
@@ -121,7 +113,7 @@ fn main() {
         .manage(audio_manager)
         .manage(sound_handle)
         .invoke_handler(
-            tauri::generate_handler![load_file_paths, play_audio, greet, pause_audio, resume_audio]
+            tauri::generate_handler![load_file_paths, play_audio, pause_audio, resume_audio]
         )
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
