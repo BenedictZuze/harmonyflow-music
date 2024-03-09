@@ -11,7 +11,6 @@ use kira::{
 use tauri::State;
 
 mod audio_files;
-mod audio_player;
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 #[tauri::command]
