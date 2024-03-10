@@ -8,7 +8,8 @@ use kira::{
     sound::{ streaming::{ StreamingSoundData, StreamingSoundSettings }, FromFileError, SoundData },
     tween::Tween,
 };
-use tauri::State;
+use serde::Serialize;
+use tauri::{ AppHandle, Manager, State };
 
 mod audio_files;
 
@@ -16,25 +17,33 @@ mod audio_files;
 fn play_audio(
     audio_path: &str,
     state: State<'_, Arc<Mutex<AudioManager>>>,
-    sound_state: State<'_, Arc<Mutex<HandleSound>>>
+    sound_state: State<'_, Arc<Mutex<HandleSound>>>,
+    app: AppHandle
 ) {
     println!("Audio path: {}", audio_path);
     let path = format!(r#"{}"#, audio_path);
+    let app_clone = app.clone();
     println!("Songs loaded: {:?}", state.lock().unwrap().num_sounds());
     let manager = Arc::clone(&state);
-    let sound_state = Arc::clone(&sound_state);
+    let og_sound_state = Arc::clone(&sound_state);
     // let handle_state = Arc::clone(&sound_state);
     let mut state = sound_state.lock().unwrap();
     if let Some(mut handle) = state.handle.take() {
         // Perform operations on handle
         handle.stop(Tween { duration: Duration::from_secs(2), ..Default::default() }).unwrap();
-        let sound_state = Arc::clone(&sound_state);
+        let sound_state = Arc::clone(&og_sound_state);
         thread::spawn(move || {
             let now = Instant::now();
             let sound_data = StreamingSoundData::from_file(
                 path,
                 StreamingSoundSettings::default()
             ).unwrap();
+            println!("Duration: {}", sound_data.duration().as_secs() as u32);
+            app_clone
+                .emit_all("duration", Pos {
+                    position: sound_data.duration().as_secs() as u32,
+                })
+                .unwrap();
             let elapsed = now.elapsed();
             println!("Loading audio data took: {:.2?}", elapsed);
             let sound_handle = manager.lock().unwrap().play(sound_data).unwrap();
@@ -48,6 +57,12 @@ fn play_audio(
                 path,
                 StreamingSoundSettings::default()
             ).unwrap();
+            println!("Duration: {}", sound_data.duration().as_secs() as u32);
+            app_clone
+                .emit_all("duration", Pos {
+                    position: sound_data.duration().as_secs() as u32,
+                })
+                .unwrap();
             let elapsed = now.elapsed();
             println!("Loading audio data took: {:.2?}", elapsed);
             let sound_handle = manager.lock().unwrap().play(sound_data).unwrap();
@@ -56,6 +71,34 @@ fn play_audio(
     }
 }
 
+#[tauri::command]
+fn get_position(app: AppHandle, sound_state: State<'_, Arc<Mutex<HandleSound>>>) {
+    let position_sound_state = Arc::clone(&sound_state);
+    let app_clone = app.clone();
+
+    // Spawn a separate thread to periodically emit position updates
+    thread::spawn(move || {
+        loop {
+            let position = {
+                let sound_state = position_sound_state.lock().unwrap();
+                if let Some(handle) = &sound_state.handle {
+                    handle.position() as u32
+                } else {
+                    0
+                }
+            };
+            // Emit the position update to the frontend
+            app_clone
+                .emit_all("positionUpdate", Pos {
+                    position,
+                })
+                .unwrap();
+
+            // Sleep for 1 second before emitting the next position
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    });
+}
 #[tauri::command]
 fn pause_audio(state: State<'_, Arc<Mutex<AudioManager>>>) {
     let manager = state.lock().unwrap();
@@ -90,6 +133,11 @@ fn resume_audio(state: State<'_, Arc<Mutex<AudioManager>>>) {
     }
 }
 
+#[derive(Debug, Serialize, Clone)]
+struct Pos {
+    position: u32,
+}
+
 #[tauri::command]
 fn load_file_paths(directory_path: &str) -> Vec<AudioFile> {
     let directory_path = format!(r#"{}"#, directory_path);
@@ -113,7 +161,13 @@ fn main() {
         .manage(audio_manager)
         .manage(sound_handle)
         .invoke_handler(
-            tauri::generate_handler![load_file_paths, play_audio, pause_audio, resume_audio]
+            tauri::generate_handler![
+                load_file_paths,
+                play_audio,
+                pause_audio,
+                resume_audio,
+                get_position
+            ]
         )
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
